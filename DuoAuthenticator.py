@@ -59,7 +59,7 @@ class DuoAuthenticator:
         print("4. Building the duo push request payload")
         self.push_payload = {
         "sid":self.auth_payload["sid"],
-        "device":"phone1",
+        "device":"phone1", # TODO: This may vary depending on the user. Need to grab information about available devices
         "factor": "Duo Push",
         "days_out_of_date": 0,
         "days_to_block": None
@@ -71,9 +71,9 @@ class DuoAuthenticator:
             "txid":r.json()["response"]["txid"]
         }
 
-    def generate_duo_auth_session(self, s: requests.Session, r: requests.Response):
+    def generate_duo_auth_session(self, s: requests.Session, hook: requests.Response):
         #find txid and parent link inside iframe
-        duo_page_soup = BeautifulSoup(r.content, "html.parser")
+        duo_page_soup = BeautifulSoup(hook.content, "html.parser")
         self.build_iframe_data(duo_page_soup)
 
         duo_auth_post = s.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth", params=self.iframe_params, data=self.iframe_payload)
@@ -114,14 +114,18 @@ class DuoAuthenticator:
 
         while True:
             get_status = s.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
-            if get_status.json()["response"]["result"]== "SUCCESS":
+            if get_status.json()["response"]["result"] == "SUCCESS":
                 print("SUCCESS!\nDUO AUTHENTICATED!")
+                break
+            if get_status.json()["response"]["result"] == "FAILURE":
+                print("User denied Duo push authentication request, authentication failed")
                 break
             time.sleep(2)
         
         print("Handing session back to user!")
 
-        print("Duo Authentication Session Request Params and Payloads:\n\n")
-        print(json.dumps(self.__dict__, indent=4))
+        if self.verbose:
+            print("Duo Authentication Session Request Params and Payloads:\n\n")
+            print(json.dumps(self.__dict__, indent=4))
         return s
 
