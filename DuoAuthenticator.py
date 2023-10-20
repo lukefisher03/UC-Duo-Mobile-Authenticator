@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 import requests 
+from requests import utils
 import time
 import json
 
@@ -29,15 +30,23 @@ class DuoAuthenticator:
 
         self.push_payload = None
         self.push_status_payload = None
+        self.sso_post_redirect_params = None
+
+        self.pre_SAML_payload = None
+        self.pre_SAML_params = None
+        self.app = None
 
     def build_iframe_data(self, soup: BeautifulSoup):
         print("1. Grabbing duo iframe attributes")
         iframe_data = soup.find("iframe")
+        self.app = iframe_data.attrs["data-sig-request"].split(":")
         self.iframe_params = {
             "tx":iframe_data.attrs["data-sig-request"].split(":")[0],
             "parent":"https://login.uc.edu" + iframe_data.attrs["data-post-action"],
             "v":"2.6"
         }
+
+        self.app = self.app[1]
 
         self.iframe_payload = {
             "tx": self.iframe_params["tx"],
@@ -71,8 +80,20 @@ class DuoAuthenticator:
             "txid":r.json()["response"]["txid"]
         }
 
+    def build_pre_SAML_payload(self, r: requests.Response):
+        self.pre_SAML_payload = {
+            "_eventId":"proceed",
+            "sig_response":r.json()["response"]["cookie"] + ":" + self.app
+        }
+        
+        self.pre_SAML_params = {
+            "execution":r.json()["response"]["parent"][-4:]
+        }
+    
     def generate_duo_auth_session(self, s: requests.Session, hook: requests.Response):
         #find txid and parent link inside iframe
+        if self.verbose:
+            print(hook.url)
         duo_page_soup = BeautifulSoup(hook.content, "html.parser")
         self.build_iframe_data(duo_page_soup)
 
@@ -122,10 +143,25 @@ class DuoAuthenticator:
                 break
             time.sleep(2)
         
-        print("Handing session back to user!")
+        txid_post = s.post("https://api-c9607b10.duosecurity.com/frame/status/" + send_push.json()["response"]["txid"], data={"sid":self.auth_payload["sid"]}, allow_redirects=True)
+        self.build_pre_SAML_payload(txid_post)
+        y = s.post(txid_post.json()["response"]["parent"], params=self.pre_SAML_params, data=self.pre_SAML_payload)
+
+        soup = BeautifulSoup(y.content, "html.parser")
+        z_location = soup.find("form", attrs={"method":"post"}).attrs["action"]
+        z_payload = {
+            "RelayState":soup.find("input", attrs={"type":"hidden", "name":"RelayState"}).attrs["value"],
+            "SAMLResponse":soup.find("input", attrs={"type":"hidden", "name":"SAMLResponse"}).attrs["value"],
+        }
+
+        z = s.post(z_location, data=z_payload)
+        print(z.text)
 
         if self.verbose:
-            print("Duo Authentication Session Request Params and Payloads:\n\n")
+            print(json.dumps(requests.utils.dict_from_cookiejar(s.cookies), indent=4))
+            print("\n\nDuo Authentication Session Request Params and Payloads:\n\n")
             print(json.dumps(self.__dict__, indent=4))
+
+        
         return s
 
