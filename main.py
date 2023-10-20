@@ -2,31 +2,19 @@ import requests
 import DuoAuthenticator
 import json
 
-payload = {
-    "root": {
-        "locations": [
-            {
-                "room_id": 2612
-            }
-        ],
-        "dates": [
-            {
-                "start_dt": "2023-10-24T14:00:00",
-                "end_dt": "2023-10-24T16:00:00",
-                "occ_id": 1
-            }
-        ]
-    }
-}
 s = requests.session()
-duo_data = DuoAuthenticator.DuoAuthenticator(verbose=True)
-#invoke a new login session by making a request that requires authentication
-get_session = s.post("https://25live.collegenet.com/25live/data/uc/run/event/quotas/check.json?caller=pro-EventQuotaService.check", data=payload, params={"caller":"pro-EventQuotaService.check"})
-user_creds = None
+duo_authenticate = DuoAuthenticator.DuoAuthenticator(verbose=False)
 
-#post login data
-with open("private_credentials.json", "r") as f:
-    user_creds = json.load(f)
-    login = s.post(get_session.url, data={"j_username":user_creds["j_username"], "j_password":user_creds["j_password"], "_eventId_proceed":""})
+if __name__ == "__main__":
+    # invoke a new login session by making a request that requires authentication
+    get_catalyst = s.get("https://www.catalyst.uc.edu/")
 
-duo_data.generate_duo_auth_session(s, login)
+    # store login data
+    with open("private_credentials.json", "r") as f:
+        user_creds = json.load(f)
+
+    # all UC websites employ a post request that takes the user credentials as the payload, the response is the hook for duo mobile.
+    login_hook = s.post(get_catalyst.url, data={"j_username":user_creds["j_username"], "j_password":user_creds["j_password"], "_eventId_proceed":""})
+    
+    # use the hook to send a duo push request
+    duo_authenticate.generate_duo_auth_session(s, login_hook)
