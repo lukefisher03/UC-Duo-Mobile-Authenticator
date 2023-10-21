@@ -134,6 +134,7 @@ class DuoAuthenticator:
             print(initial_status.text)
 
         while True:
+            # wait for end user to duo authenticate
             get_status = s.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
             if get_status.json()["response"]["result"] == "SUCCESS":
                 print("SUCCESS!\nDUO AUTHENTICATED!")
@@ -143,25 +144,28 @@ class DuoAuthenticator:
                 break
             time.sleep(2)
         
-        txid_post = s.post("https://api-c9607b10.duosecurity.com/frame/status/" + send_push.json()["response"]["txid"], data={"sid":self.auth_payload["sid"]}, allow_redirects=True)
-        self.build_pre_SAML_payload(txid_post)
-        y = s.post(txid_post.json()["response"]["parent"], params=self.pre_SAML_params, data=self.pre_SAML_payload)
+        # We have to make a post request using the txid to retrieve the duo mobile auth cookie
+        duo_txid_post = s.post("https://api-c9607b10.duosecurity.com/frame/status/" + send_push.json()["response"]["txid"], data={"sid":self.auth_payload["sid"]}, allow_redirects=True)
+        self.build_pre_SAML_payload(duo_txid_post)
 
-        soup = BeautifulSoup(y.content, "html.parser")
-        z_location = soup.find("form", attrs={"method":"post"}).attrs["action"]
-        z_payload = {
-            "RelayState":soup.find("input", attrs={"type":"hidden", "name":"RelayState"}).attrs["value"],
-            "SAMLResponse":soup.find("input", attrs={"type":"hidden", "name":"SAMLResponse"}).attrs["value"],
+        # Need to get SAML information and let the response set session cookies
+        retrieve_SAML_post = s.post(duo_txid_post.json()["response"]["parent"], params=self.pre_SAML_params, data=self.pre_SAML_payload)
+        saml_response_soup = BeautifulSoup(retrieve_SAML_post.content, "html.parser")
+
+        # Grab redirect link embedded in the HTML response, this tells us where to post the final request and login to the right service.
+        SAML_set_cookies_post_location = saml_response_soup.find("form", attrs={"method":"post"}).attrs["action"]
+        SAML_set_cookies_payload = {
+            "RelayState":saml_response_soup.find("input", attrs={"type":"hidden", "name":"RelayState"}).attrs["value"],
+            "SAMLResponse":saml_response_soup.find("input", attrs={"type":"hidden", "name":"SAMLResponse"}).attrs["value"],
         }
 
-        z = s.post(z_location, data=z_payload)
-        print(z.text)
+        # post the data, redirects set session cookies that persist our login
+        SAML_set_session_cookies = s.post(SAML_set_cookies_post_location, data=SAML_set_cookies_payload)
 
         if self.verbose:
             print(json.dumps(requests.utils.dict_from_cookiejar(s.cookies), indent=4))
             print("\n\nDuo Authentication Session Request Params and Payloads:\n\n")
             print(json.dumps(self.__dict__, indent=4))
 
-        
         return s
 
