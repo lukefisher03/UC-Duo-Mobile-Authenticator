@@ -39,6 +39,8 @@ class DuoAuthenticator:
     def build_iframe_data(self, soup: BeautifulSoup):
         print("1. Grabbing duo iframe attributes")
         iframe_data = soup.find("iframe")
+        if not iframe_data:
+            return False
         self.app = iframe_data.attrs["data-sig-request"].split(":")
         self.iframe_params = {
             "tx":iframe_data.attrs["data-sig-request"].split(":")[0],
@@ -59,6 +61,8 @@ class DuoAuthenticator:
             "is_ipad_os":False,
             "react_support":True
         }
+
+        return True
 
     def build_auth_payload(self, soup: BeautifulSoup):
         print("2. Building authentication payload with iframe attributes")
@@ -95,7 +99,9 @@ class DuoAuthenticator:
         if self.verbose:
             print(hook.url)
         duo_page_soup = BeautifulSoup(hook.content, "html.parser")
-        self.build_iframe_data(duo_page_soup)
+        if not self.build_iframe_data(duo_page_soup):
+            print("Duo mobile authentication not triggered, invalid credentials. Showing response content: \n", duo_page_soup.prettify())
+            return s
 
         duo_auth_post = s.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth", params=self.iframe_params, data=self.iframe_payload)
 
