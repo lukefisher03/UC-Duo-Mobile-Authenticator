@@ -9,7 +9,7 @@ if __name__ == "__main__":
 
     get_catalyst = s.get("https://25live.collegenet.com/25live/data/uc/run/login.shibboleth")
     # store login data
-    with open("private_credentials.json", "r") as f:
+    with open("credentials.json", "r") as f:
         user_creds = json.load(f)
 
     # all UC websites employ a post request that takes the user credentials as the payload, the response is the hook for duo mobile.
