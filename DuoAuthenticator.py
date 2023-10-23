@@ -8,8 +8,10 @@ class DuoAuthenticator:
     """
     Returns a python session object that has authenticated past DUO mobile for University of Cincinnati
     """
-    def __init__(self, verbose=False) -> None:
+    def __init__(self, session: requests.Session, hook : requests.Response, verbose=False) -> None:
         print("Initializing Duo Request Data Aggregation Service...")
+        self.session = session
+        self.hook = hook
         self.verbose = verbose
         self.iframe_params = None
         self.iframe_payload = None
@@ -35,6 +37,7 @@ class DuoAuthenticator:
         self.pre_SAML_payload = None
         self.pre_SAML_params = None
         self.app = None
+        self.generate_duo_auth_session()
 
     def build_iframe_data(self, soup: BeautifulSoup):
         print("1. Grabbing duo iframe attributes")
@@ -93,17 +96,22 @@ class DuoAuthenticator:
         self.pre_SAML_params = {
             "execution":r.json()["response"]["parent"][-4:]
         }
-    
-    def generate_duo_auth_session(self, s: requests.Session, hook: requests.Response):
+
+    def export_session_cookes(self, filename : str) -> dict:
+        utils.dict_from_cookiejar()
+        with open(filename, "w"):
+            pass
+
+    def generate_duo_auth_session(self):
         #find txid and parent link inside iframe
         if self.verbose:
-            print(hook.url)
-        duo_page_soup = BeautifulSoup(hook.content, "html.parser")
+            print(self.hook.url)
+        duo_page_soup = BeautifulSoup(self.hook.content, "html.parser")
         if not self.build_iframe_data(duo_page_soup):
             print("Duo mobile authentication not triggered, invalid credentials. Showing response content: \n", duo_page_soup.prettify())
-            return s
+            return self.session
 
-        duo_auth_post = s.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth", params=self.iframe_params, data=self.iframe_payload)
+        duo_auth_post = self.session.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth", params=self.iframe_params, data=self.iframe_payload)
 
         if self.verbose:
             print("Duo authentication post request to retrieve iframe")
@@ -113,7 +121,7 @@ class DuoAuthenticator:
         self.build_auth_payload(duo_form_soup)
 
         print("3. Posting session authentication credentials to duo server")
-        final_auth_post = s.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth?", params=self.iframe_params, data=self.auth_payload)
+        final_auth_post = self.session.post("https://api-c9607b10.duosecurity.com/frame/web/v1/auth?", params=self.iframe_params, data=self.auth_payload)
 
         if self.verbose:
             print("Response from server for authentication post:")
@@ -121,7 +129,7 @@ class DuoAuthenticator:
 
         self.build_push_payload()
 
-        send_push = s.post("https://api-c9607b10.duosecurity.com/frame/prompt", data=self.push_payload)
+        send_push = self.session.post("https://api-c9607b10.duosecurity.com/frame/prompt", data=self.push_payload)
         
         if self.verbose:
             print("Push request server response:")
@@ -130,7 +138,7 @@ class DuoAuthenticator:
         print("5. Duo push sent, Waiting for authentication from end user")
 
         self.build_status_payload(send_push)
-        initial_status = s.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
+        initial_status = self.session.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
         if self.verbose:
             print("Status post request server response: ")
             print(initial_status.text)
@@ -141,7 +149,7 @@ class DuoAuthenticator:
 
         while True:
             # wait for end user to duo authenticate
-            get_status = s.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
+            get_status = self.session.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
             if get_status.json()["response"].get("result") == "SUCCESS":
                 print("SUCCESS!\nDUO AUTHENTICATED!")
                 break
@@ -151,11 +159,11 @@ class DuoAuthenticator:
             time.sleep(2)
         
         # We have to make a post request using the txid to retrieve the duo mobile auth cookie
-        duo_txid_post = s.post("https://api-c9607b10.duosecurity.com/frame/status/" + send_push.json()["response"]["txid"], data={"sid":self.auth_payload["sid"]}, allow_redirects=True)
+        duo_txid_post = self.session.post("https://api-c9607b10.duosecurity.com/frame/status/" + send_push.json()["response"]["txid"], data={"sid":self.auth_payload["sid"]}, allow_redirects=True)
         self.build_pre_SAML_payload(duo_txid_post)
 
         # Need to get SAML information and let the response set session cookies
-        retrieve_SAML_post = s.post(duo_txid_post.json()["response"]["parent"], params=self.pre_SAML_params, data=self.pre_SAML_payload)
+        retrieve_SAML_post = self.session.post(duo_txid_post.json()["response"]["parent"], params=self.pre_SAML_params, data=self.pre_SAML_payload)
         saml_response_soup = BeautifulSoup(retrieve_SAML_post.content, "html.parser")
 
         # Grab redirect link embedded in the HTML response, this tells us where to post the final request and login to the right service.
@@ -166,12 +174,11 @@ class DuoAuthenticator:
         }
 
         # post the data, redirects set session cookies that persist our login
-        SAML_set_session_cookies = s.post(SAML_set_cookies_post_location, data=SAML_set_cookies_payload)
+        SAML_set_session_cookies = self.session.post(SAML_set_cookies_post_location, data=SAML_set_cookies_payload)
 
         if self.verbose:
-            print(json.dumps(requests.utils.dict_from_cookiejar(s.cookies), indent=4))
+            print(json.dumps(requests.utils.dict_from_cookiejar(self.session.cookies), indent=4))
             print("\n\nDuo Authentication Session Request Params and Payloads:\n\n")
-            print(json.dumps(self.__dict__, indent=4))
 
-        return s
+        return self.session
 
