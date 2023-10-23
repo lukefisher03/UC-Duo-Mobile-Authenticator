@@ -142,10 +142,10 @@ class DuoAuthenticator:
         while True:
             # wait for end user to duo authenticate
             get_status = s.post("https://api-c9607b10.duosecurity.com/frame/status", data=self.push_status_payload)
-            if get_status.json()["response"]["result"] == "SUCCESS":
+            if get_status.json()["response"].get("result") == "SUCCESS":
                 print("SUCCESS!\nDUO AUTHENTICATED!")
                 break
-            if get_status.json()["response"]["result"] == "FAILURE":
+            if get_status.json()["response"].get("result") == "FAILURE":
                 print("User denied Duo push authentication request, authentication failed")
                 break
             time.sleep(2)
